@@ -13,6 +13,7 @@ import re
 
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
+STRATZ_TOKEN = os.getenv("STRATZ_TOKEN")
 
 intents = nextcord.Intents.default()
 intents.message_content = True
@@ -24,10 +25,7 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 generator_channel_id = None
 heroes_dict = {}
-
-# ============================================
-# TODOS LOS HÉROES GUARDADOS EN EL CÓDIGO
-# ============================================
+items_dict = {}
 
 NOMBRES_HEROES = [
     "Anti-Mage", "Axe", "Bane", "Bloodseeker", "Crystal Maiden", "Drow Ranger",
@@ -55,7 +53,6 @@ NOMBRES_HEROES = [
     "Muerta", "Kez", "Ringmaster"
 ]
 
-# ALIASES PARA NOMBRES CORTOS
 ALIASES = {
     "am": "Anti-Mage", "pa": "Phantom Assassin", "sf": "Shadow Fiend",
     "pl": "Phantom Lancer", "pudge": "Pudge", "legion": "Legion Commander",
@@ -124,60 +121,154 @@ async def descargar_imagen_heroe(session, hero_name_api):
     
     return img, False
 
-async def generar_imagen_contrapicks(contrapicks):
-    img_width = 280
-    img_height = 160
-    padding = 20
-    
-    cols = 5
-    total_width = cols * (img_width + padding) + padding
-    total_height = img_height + padding + 75
-    
-    mosaic = Image.new('RGBA', (total_width, total_height), color=(30, 30, 40, 255))
-    draw = ImageDraw.Draw(mosaic)
-    
-    try:
-        font_titulo = ImageFont.truetype("arial.ttf", 28)
-        font_winrate = ImageFont.truetype("arial.ttf", 24)
-    except:
-        font_titulo = ImageFont.load_default()
-        font_winrate = ImageFont.load_default()
-    
-    bbox = draw.textbbox((0, 0), "⚔️ MEJORES CONTRAPICKS", font=font_titulo)
-    text_width = bbox[2] - bbox[0]
-    text_x = (total_width - text_width) // 2
-    draw.text((text_x, 10), "⚔️ MEJORES CONTRAPICKS", fill=(255, 215, 0, 255), font=font_titulo)
+async def obtener_contrapicks(heroe_ids):
+    contrapicks_scores = {}
+    contrapicks_games = {}
     
     async with aiohttp.ClientSession() as session:
-        for idx, (hero_id, winrate) in enumerate(contrapicks):
-            hero = heroes_dict.get(hero_id)
-            if not hero:
+        for heroe_id in heroe_ids:
+            try:
+                url = f"https://api.opendota.com/api/heroes/{heroe_id}/matchups"
+                async with session.get(url) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        
+                        for matchup in data[:30]:
+                            hero_contra = matchup['hero_id']
+                            
+                            if hero_contra not in heroe_ids:
+                                wins = matchup.get('wins', 0)
+                                games = matchup.get('games_played', 0)
+                                
+                                if hero_contra not in contrapicks_scores:
+                                    contrapicks_scores[hero_contra] = 0
+                                    contrapicks_games[hero_contra] = 0
+                                
+                                contrapicks_scores[hero_contra] += wins
+                                contrapicks_games[hero_contra] += games
+                                
+            except Exception as e:
                 continue
-            
-            x = padding + idx * (img_width + padding)
-            y = 50
-            
-            img, _ = await descargar_imagen_heroe(session, hero['name'])
-            img = img.resize((img_width, img_height), Image.Resampling.LANCZOS)
-            mosaic.paste(img, (x, y), img)
-            
-            draw.rectangle([x, y, x + img_width, y + img_height], 
-                          outline=(255, 215, 0, 255), width=4)
-            
-            winrate_text = f"{winrate:.1f}%"
-            bbox = draw.textbbox((0, 0), winrate_text, font=font_winrate)
-            text_width = bbox[2] - bbox[0]
-            text_x = x + (img_width - text_width) // 2
-            text_y = y + img_height + 12
-            draw.text((text_x, text_y), winrate_text, fill=(255, 215, 0, 255), font=font_winrate)
     
-    output = BytesIO()
-    mosaic_rgb = Image.new('RGB', mosaic.size, (30, 30, 40))
-    mosaic_rgb.paste(mosaic, mask=mosaic.split()[3] if mosaic.mode == 'RGBA' else None)
-    mosaic_rgb.save(output, "PNG", compress_level=1, optimize=False)
-    output.seek(0)
+    winrates = {}
+    for hero_id, wins in contrapicks_scores.items():
+        games = contrapicks_games.get(hero_id, 0)
+        if games > 0:
+            winrates[hero_id] = (wins / games) * 100
+        else:
+            winrates[hero_id] = 0
     
-    return output
+    mejores = sorted(winrates.items(), key=lambda x: x[1], reverse=True)
+    return mejores[:3]
+
+async def obtener_items_stratz(heroe_id, enemigos_ids):
+    if not STRATZ_TOKEN:
+        return None
+    
+    url = f"https://api.stratz.com/api/v1/Hero/{heroe_id}/matchups"
+    
+    headers = {
+        "Authorization": f"Bearer {STRATZ_TOKEN}"
+    }
+    
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=headers) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    
+                    items_early = {}
+                    items_mid = {}
+                    items_late = {}
+                    
+                    for matchup in data.get('matchups', []):
+                        if matchup['heroId'] in enemigos_ids:
+                            for item in matchup.get('earlyGameItems', []):
+                                item_id = item['itemId']
+                                popularity = item.get('popularity', 0)
+                                items_early[item_id] = items_early.get(item_id, 0) + popularity
+                            
+                            for item in matchup.get('midGameItems', []):
+                                item_id = item['itemId']
+                                popularity = item.get('popularity', 0)
+                                items_mid[item_id] = items_mid.get(item_id, 0) + popularity
+                            
+                            for item in matchup.get('lateGameItems', []):
+                                item_id = item['itemId']
+                                popularity = item.get('popularity', 0)
+                                items_late[item_id] = items_late.get(item_id, 0) + popularity
+                    
+                    early = sorted(items_early.items(), key=lambda x: x[1], reverse=True)[:4]
+                    mid = sorted(items_mid.items(), key=lambda x: x[1], reverse=True)[:4]
+                    late = sorted(items_late.items(), key=lambda x: x[1], reverse=True)[:4]
+                    
+                    return {
+                        'early': early,
+                        'mid': mid,
+                        'late': late
+                    }
+    except Exception as e:
+        print(f"Error en Stratz API: {e}")
+    
+    return None
+
+async def obtener_items_opendota(heroe_id):
+    try:
+        url = f"https://api.opendota.com/api/heroes/{heroe_id}/itemPopularity"
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    
+                    early = sorted(data.get('early_game', {}).items(), key=lambda x: x[1], reverse=True)[:4]
+                    mid = sorted(data.get('mid_game', {}).items(), key=lambda x: x[1], reverse=True)[:4]
+                    late = sorted(data.get('late_game', {}).items(), key=lambda x: x[1], reverse=True)[:4]
+                    
+                    return {
+                        'early': [(int(item_id), popularity * 100) for item_id, popularity in early],
+                        'mid': [(int(item_id), popularity * 100) for item_id, popularity in mid],
+                        'late': [(int(item_id), popularity * 100) for item_id, popularity in late]
+                    }
+    except Exception as e:
+        print(f"Error en OpenDota items: {e}")
+    
+    return None
+
+def nombre_a_id(nombre_texto):
+    global heroes_dict
+    nombre = nombre_texto.strip().lower()
+    
+    for hero_id, hero in heroes_dict.items():
+        api = hero["localized_name"].strip().lower()
+        if api == nombre:
+            return hero_id
+    
+    return None
+
+async def autocompletar_heroes(interaction: Interaction, texto_actual: str):
+    texto_actual = texto_actual.lower().strip()
+    
+    if not texto_actual:
+        return NOMBRES_HEROES[:25]
+    
+    sugerencias = []
+    for nombre in NOMBRES_HEROES:
+        if texto_actual in nombre.lower():
+            sugerencias.append(nombre)
+            if len(sugerencias) >= 25:
+                break
+    
+    if not sugerencias:
+        sugerencias = NOMBRES_HEROES[:25]
+    
+    return sugerencias
+
+async def manejar_autocompletado(interaction: Interaction, texto_actual: str):
+    try:
+        sugerencias = await autocompletar_heroes(interaction, texto_actual)
+        await interaction.response.send_autocomplete(sugerencias)
+    except Exception:
+        pass
 
 async def generar_imagen_enemigos(enemigos_ids):
     img_width = 280
@@ -225,88 +316,11 @@ async def generar_imagen_enemigos(enemigos_ids):
     
     return output
 
-async def obtener_contrapicks(heroe_ids):
-    contrapicks_scores = {}
-    contrapicks_games = {}
-    
-    async with aiohttp.ClientSession() as session:
-        for heroe_id in heroe_ids:
-            try:
-                url = f"https://api.opendota.com/api/heroes/{heroe_id}/matchups"
-                async with session.get(url) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        
-                        for matchup in data[:30]:
-                            hero_contra = matchup['hero_id']
-                            
-                            if hero_contra not in heroe_ids:
-                                wins = matchup.get('wins', 0)
-                                games = matchup.get('games_played', 0)
-                                
-                                if hero_contra not in contrapicks_scores:
-                                    contrapicks_scores[hero_contra] = 0
-                                    contrapicks_games[hero_contra] = 0
-                                
-                                contrapicks_scores[hero_contra] += wins
-                                contrapicks_games[hero_contra] += games
-                                
-            except Exception as e:
-                continue
-    
-    winrates = {}
-    for hero_id, wins in contrapicks_scores.items():
-        games = contrapicks_games.get(hero_id, 0)
-        if games > 0:
-            winrates[hero_id] = (wins / games) * 100
-        else:
-            winrates[hero_id] = 0
-    
-    mejores = sorted(winrates.items(), key=lambda x: x[1], reverse=True)
-    return mejores[:5]
-
-def nombre_a_id(nombre_texto):
-    global heroes_dict
-
-    print("LEN:", len(heroes_dict))
-
-    nombre = nombre_texto.strip().lower()
-
-    for hero_id, hero in heroes_dict.items():
-        api = hero["localized_name"].strip().lower()
-
-        if api == nombre:
-            return hero_id
-
-    return None
-
 # ============================================
-# AUTOCOMPLETADO GENERICO (SIN ERRORES)
+# COMANDO COUNTER - DEFINITIVO (SIN EMBED DE 5 HÉROES)
 # ============================================
 
-async def autocompletar_heroes(interaction: Interaction, texto_actual: str):
-    texto_actual = texto_actual.lower().strip()
-    
-    if not texto_actual:
-        return NOMBRES_HEROES[:25]
-    
-    sugerencias = []
-    for nombre in NOMBRES_HEROES:
-        if texto_actual in nombre.lower():
-            sugerencias.append(nombre)
-            if len(sugerencias) >= 25:
-                break
-    
-    if not sugerencias:
-        sugerencias = NOMBRES_HEROES[:25]
-    
-    return sugerencias
-
-# ============================================
-# COMANDO COUNTER CON 5 CAMPOS
-# ============================================
-
-@bot.slash_command(name="counter", description="Muestra los 5 mejores contrapicks para hasta 5 héroes")
+@bot.slash_command(name="counter", description="Muestra contrapicks y guía de items para counterear")
 async def counter(
     interaction: Interaction,
     heroe1: str = SlashOption(
@@ -335,7 +349,10 @@ async def counter(
         required=False
     )
 ):
-    await interaction.response.defer()
+    try:
+        await interaction.response.defer()
+    except Exception:
+        pass
     
     try:
         heroes_input = [heroe1]
@@ -348,93 +365,118 @@ async def counter(
         if heroe5:
             heroes_input.append(heroe5)
         
-        numeros_procesados = []
-        nombres_validos = []
+        enemigos_ids = []
+        enemigos_nombres = []
         
         for nombre in heroes_input:
-            print(f"RECIBIDO: {repr(nombre)}")
-
             hero_id = nombre_a_id(nombre)
-
             if hero_id:
-                numeros_procesados.append(hero_id)
-                nombres_validos.append(nombre)
+                enemigos_ids.append(hero_id)
+                enemigos_nombres.append(nombre)
             else:
                 await interaction.followup.send(f"❌ No se encontró el héroe: **{nombre}**")
                 return
         
-        if not numeros_procesados:
+        if not enemigos_ids:
             await interaction.followup.send("❌ No se encontraron héroes válidos.")
             return
         
-        if len(numeros_procesados) > 5:
-            await interaction.followup.send(f"⚠️ **Máximo 5 héroes.** Tienes {len(numeros_procesados)}.")
-            return
-        
-        await interaction.followup.send("🔄 **Buscando los mejores contrapicks...**")
-        mensaje = await interaction.original_message()
-        
-        contrapicks = await obtener_contrapicks(numeros_procesados)
+        # Obtener contrapicks (solo 3)
+        contrapicks = await obtener_contrapicks(enemigos_ids)
         
         if not contrapicks:
-            await mensaje.edit(content="❌ No se encontraron contrapicks para estos héroes")
+            await interaction.followup.send("❌ No se encontraron contrapicks para estos héroes")
             return
         
-        imagen_enemigos = await generar_imagen_enemigos(numeros_procesados)
+        # === 1. ENVIAR IMAGEN DE ENEMIGOS ===
+        imagen_enemigos = await generar_imagen_enemigos(enemigos_ids)
         file_enemigos = nextcord.File(imagen_enemigos, filename="enemigos.png")
-        
         embed_enemigos = nextcord.Embed(color=0xff0000)
         embed_enemigos.set_image(url="attachment://enemigos.png")
-        
-        await mensaje.delete()
         await interaction.followup.send(embed=embed_enemigos, file=file_enemigos)
         
-        imagen_contrapicks = await generar_imagen_contrapicks(contrapicks)
-        file_contrapicks = nextcord.File(imagen_contrapicks, filename="contrapicks.png")
-        
-        enemigos_str = ', '.join(nombres_validos)
-        
-        embed_contrapicks = nextcord.Embed(
-            title="⚔️ MEJORES CONTRAPICKS",
-            description=f"👹 **Enemigos:** {enemigos_str}",
-            color=0x3498db
-        )
-        embed_contrapicks.set_image(url="attachment://contrapicks.png")
-        embed_contrapicks.set_footer(text="Basado en estadísticas de OpenDota | Datos de partidas reales")
-        
-        await interaction.followup.send(embed=embed_contrapicks, file=file_contrapicks)
+        # === 2. ENVIAR 3 EMBEDS DE CONTRAPICKS ===
+        for idx, (hero_id, winrate) in enumerate(contrapicks[:3]):
+            hero = heroes_dict.get(hero_id)
+            if not hero:
+                continue
+            
+            # Obtener items (Stratz o OpenDota)
+            items_guia = await obtener_items_stratz(hero_id, enemigos_ids)
+            if not items_guia:
+                items_guia = await obtener_items_opendota(hero_id)
+            
+            embed = nextcord.Embed(
+                title=f"🛡️ {hero['localized_name']}",
+                color=0x00ff00
+            )
+            
+            embed.add_field(name="📊 Winrate", value=f"{winrate:.1f}%", inline=False)
+            
+            if items_guia:
+                early_text = ""
+                for item_id, popularity in items_guia['early']:
+                    if isinstance(item_id, int):
+                        item_name = items_dict.get(item_id, f"Item {item_id}")
+                    else:
+                        item_name = items_dict.get(int(item_id), f"Item {item_id}")
+                    early_text += f"• **{item_name}** ({popularity:.1f}%)\n"
+                if early_text:
+                    embed.add_field(name="🌱 Early Game", value=early_text, inline=True)
+                
+                mid_text = ""
+                for item_id, popularity in items_guia['mid']:
+                    if isinstance(item_id, int):
+                        item_name = items_dict.get(item_id, f"Item {item_id}")
+                    else:
+                        item_name = items_dict.get(int(item_id), f"Item {item_id}")
+                    mid_text += f"• **{item_name}** ({popularity:.1f}%)\n"
+                if mid_text:
+                    embed.add_field(name="⚔️ Mid Game", value=mid_text, inline=True)
+                
+                late_text = ""
+                for item_id, popularity in items_guia['late']:
+                    if isinstance(item_id, int):
+                        item_name = items_dict.get(item_id, f"Item {item_id}")
+                    else:
+                        item_name = items_dict.get(int(item_id), f"Item {item_id}")
+                    late_text += f"• **{item_name}** ({popularity:.1f}%)\n"
+                if late_text:
+                    embed.add_field(name="🔥 Late Game", value=late_text, inline=True)
+            
+            # Descargar imagen del héroe como thumbnail
+            async with aiohttp.ClientSession() as session:
+                img, _ = await descargar_imagen_heroe(session, hero['name'])
+                img_bytes = BytesIO()
+                img.save(img_bytes, format='PNG')
+                img_bytes.seek(0)
+                file = nextcord.File(img_bytes, filename=f"hero_{idx}.png")
+                embed.set_thumbnail(url=f"attachment://hero_{idx}.png")
+                
+                await interaction.followup.send(embed=embed, file=file)
         
     except Exception as e:
         await interaction.followup.send(f"❌ Error: {str(e)}")
 
-# ============================================
-# REGISTRAR AUTOCOMPLETADO PARA CADA CAMPO
-# ============================================
-
 @counter.on_autocomplete("heroe1")
 async def autocompletar_heroe1(interaction: Interaction, texto_actual: str):
-    sugerencias = await autocompletar_heroes(interaction, texto_actual)
-    await interaction.response.send_autocomplete(sugerencias)
+    await manejar_autocompletado(interaction, texto_actual)
 
 @counter.on_autocomplete("heroe2")
 async def autocompletar_heroe2(interaction: Interaction, texto_actual: str):
-    sugerencias = await autocompletar_heroes(interaction, texto_actual)
-    await interaction.response.send_autocomplete(sugerencias)
+    await manejar_autocompletado(interaction, texto_actual)
 
 @counter.on_autocomplete("heroe3")
 async def autocompletar_heroe3(interaction: Interaction, texto_actual: str):
-    sugerencias = await autocompletar_heroes(interaction, texto_actual)
-    await interaction.response.send_autocomplete(sugerencias)
+    await manejar_autocompletado(interaction, texto_actual)
 
 @counter.on_autocomplete("heroe4")
 async def autocompletar_heroe4(interaction: Interaction, texto_actual: str):
-    sugerencias = await autocompletar_heroes(interaction, texto_actual)
-    await interaction.response.send_autocomplete(sugerencias)
+    await manejar_autocompletado(interaction, texto_actual)
 
 @counter.on_autocomplete("heroe5")
 async def autocompletar_heroe5(interaction: Interaction, texto_actual: str):
-    sugerencias = await autocompletar_heroes(interaction, texto_actual)
-    await interaction.response.send_autocomplete(sugerencias)
+    await manejar_autocompletado(interaction, texto_actual)
 
 @bot.slash_command(name="generador", description="Asignar canal generador de salas temporales")
 async def generador(
@@ -547,13 +589,34 @@ async def on_voice_state_update(member, before, after):
 
 @bot.event
 async def on_ready():
-    global heroes_dict
-
+    global heroes_dict, items_dict
+    
     async with aiohttp.ClientSession() as session:
         async with session.get("https://api.opendota.com/api/heroes") as response:
             if response.status == 200:
                 heroes = await response.json()
                 heroes_dict = {h["id"]: h for h in heroes}
+        
+        async with session.get("https://api.opendota.com/api/constants/items") as response:
+            if response.status == 200:
+                items_data = await response.json()
+                items_dict = {}
+                for item_id, item_data in items_data.items():
+                    try:
+                        item_id_int = int(item_id)
+                        items_dict[item_id_int] = item_data.get('dname', item_id)
+                    except ValueError:
+                        items_dict[item_id] = item_data.get('dname', item_id)
+    
+    print(f"✅ Bot conectado como {bot.user}")
+    print(f"✅ {len(heroes_dict)} héroes cargados")
+    print(f"✅ {len(items_dict)} items cargados")
+    
+    try:
+        await bot.sync_all_application_commands()
+        print("✅ Comandos slash sincronizados")
+    except Exception as e:
+        print(f"⚠️ Error al sincronizar comandos: {e}")
 
 if __name__ == "__main__":
     bot.run(TOKEN)
