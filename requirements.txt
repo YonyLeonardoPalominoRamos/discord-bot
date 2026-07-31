@@ -2,3 +2,4 @@ nextcord
 yt-dlp
 python-dotenv
 Pillow
+aiohttp
