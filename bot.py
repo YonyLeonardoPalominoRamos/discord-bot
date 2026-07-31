@@ -13,7 +13,6 @@ import re
 
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
-STRATZ_TOKEN = os.getenv("STRATZ_TOKEN")
 
 intents = nextcord.Intents.default()
 intents.message_content = True
@@ -26,6 +25,7 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 generator_channel_id = None
 heroes_dict = {}
 items_dict = {}
+items_dict_es = {}
 
 NOMBRES_HEROES = [
     "Anti-Mage", "Axe", "Bane", "Bloodseeker", "Crystal Maiden", "Drow Ranger",
@@ -84,6 +84,90 @@ ALIASES = {
     "clinkz": "Clinkz", "spectre": "Spectre", "troll": "Troll Warlord",
     "magnus": "Magnus", "brew": "Brewmaster", "brewmaster": "Brewmaster",
     "shaman": "Shadow Shaman", "ss": "Shadow Shaman"
+}
+
+ITEM_IMAGE_NAMES = {
+    1: "wraith_band",
+    2: "blades_of_attack",
+    3: "broadsword",
+    4: "chainmail",
+    5: "claymore",
+    6: "helm_of_iron_will",
+    7: "javelin",
+    8: "mithril_hammer",
+    9: "platemail",
+    10: "quarterstaff",
+    11: "quelling_blade",
+    12: "ring_of_protection",
+    13: "ring_of_regeneration",
+    14: "robe_of_the_magi",
+    15: "sobi_mask",
+    16: "sages_mask",
+    17: "staff_of_wizardry",
+    18: "talisman_of_evasion",
+    19: "gauntlets",
+    20: "slippers",
+    21: "mantle",
+    22: "band_of_elvenskin",
+    23: "belt_of_strength",
+    24: "boots_of_elves",
+    25: "ogre_axe",
+    26: "blade_of_alacrity",
+    27: "staff_of_wizardry",
+    28: "ultimate_orb",
+    29: "gloves_of_haste",
+    30: "circlet",
+    31: "crown",
+    32: "recipe_wraith_band",
+    33: "recipe_null_talisman",
+    34: "recipe_bracer",
+    35: "recipe_magic_wand",
+    36: "magic_stick",
+    37: "clarity",
+    38: "flask",
+    39: "tango",
+    40: "smoke_of_deceit",
+    41: "dust",
+    42: "observer_ward",
+    43: "sentry_ward",
+    44: "town_portal_scroll",
+    45: "bottle",
+    46: "gem",
+    47: "arcane_boots",
+    48: "tranquil_boots",
+    49: "phase_boots",
+    50: "power_treads",
+    51: "boots_of_speed",
+    52: "magic_wand",
+    53: "force_staff",
+    54: "blink",
+    55: "aghanims_scepter",
+    56: "black_king_bar",
+    57: "glimmer_cape",
+    58: "euls_scepter",
+    59: "ghost_scepter",
+    60: "refresher_orb",
+    61: "scythe_of_vyse",
+    62: "aeon_disk",
+    63: "octarine_core",
+    64: "shivas_guard",
+    65: "linkens_sphere",
+    66: "urn_of_shadows",
+    67: "bracer",
+    68: "null_talisman",
+    69: "wraith_band",
+    70: "iron_branch",
+    71: "healing_salve",
+    72: "shadow_amulet",
+    73: "radiance",
+    74: "butterfly",
+    75: "heart_of_tarrasque",
+    76: "assault_cuirass",
+    77: "pipe_of_insight",
+    78: "manta_style",
+    79: "eye_of_skadi",
+    80: "sange_and_yasha",
+    81: "abyssal_blade",
 }
 
 async def descargar_imagen_heroe(session, hero_name_api):
@@ -161,73 +245,35 @@ async def obtener_contrapicks(heroe_ids):
     mejores = sorted(winrates.items(), key=lambda x: x[1], reverse=True)
     return mejores[:3]
 
-async def obtener_items_stratz(heroe_id, enemigos_ids):
-    if not STRATZ_TOKEN:
-        return None
-    
-    url = f"https://api.stratz.com/api/v1/Hero/{heroe_id}/matchups"
-    
-    headers = {
-        "Authorization": f"Bearer {STRATZ_TOKEN}"
-    }
-    
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=headers) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    
-                    items_early = {}
-                    items_mid = {}
-                    items_late = {}
-                    
-                    for matchup in data.get('matchups', []):
-                        if matchup['heroId'] in enemigos_ids:
-                            for item in matchup.get('earlyGameItems', []):
-                                item_id = item['itemId']
-                                popularity = item.get('popularity', 0)
-                                items_early[item_id] = items_early.get(item_id, 0) + popularity
-                            
-                            for item in matchup.get('midGameItems', []):
-                                item_id = item['itemId']
-                                popularity = item.get('popularity', 0)
-                                items_mid[item_id] = items_mid.get(item_id, 0) + popularity
-                            
-                            for item in matchup.get('lateGameItems', []):
-                                item_id = item['itemId']
-                                popularity = item.get('popularity', 0)
-                                items_late[item_id] = items_late.get(item_id, 0) + popularity
-                    
-                    early = sorted(items_early.items(), key=lambda x: x[1], reverse=True)[:4]
-                    mid = sorted(items_mid.items(), key=lambda x: x[1], reverse=True)[:4]
-                    late = sorted(items_late.items(), key=lambda x: x[1], reverse=True)[:4]
-                    
-                    return {
-                        'early': early,
-                        'mid': mid,
-                        'late': late
-                    }
-    except Exception as e:
-        print(f"Error en Stratz API: {e}")
-    
-    return None
-
 async def obtener_items_opendota(heroe_id):
+    url = f"https://api.opendota.com/api/heroes/{heroe_id}/itemPopularity"
+    
     try:
-        url = f"https://api.opendota.com/api/heroes/{heroe_id}/itemPopularity"
         async with aiohttp.ClientSession() as session:
             async with session.get(url) as response:
                 if response.status == 200:
                     data = await response.json()
                     
-                    early = sorted(data.get('early_game', {}).items(), key=lambda x: x[1], reverse=True)[:4]
-                    mid = sorted(data.get('mid_game', {}).items(), key=lambda x: x[1], reverse=True)[:4]
-                    late = sorted(data.get('late_game', {}).items(), key=lambda x: x[1], reverse=True)[:4]
+                    start = sorted(data.get('start_game_items', {}).items(), 
+                                   key=lambda x: x[1], reverse=True)[:6]
+                    early = sorted(data.get('early_game_items', {}).items(), 
+                                   key=lambda x: x[1], reverse=True)[:6]
+                    mid = sorted(data.get('mid_game_items', {}).items(), 
+                                 key=lambda x: x[1], reverse=True)[:6]
+                    late = sorted(data.get('late_game_items', {}).items(), 
+                                  key=lambda x: x[1], reverse=True)[:6]
+                    
+                    # Calcular total de partidas para porcentajes
+                    total_start = sum(count for _, count in start) if start else 1
+                    total_early = sum(count for _, count in early) if early else 1
+                    total_mid = sum(count for _, count in mid) if mid else 1
+                    total_late = sum(count for _, count in late) if late else 1
                     
                     return {
-                        'early': [(int(item_id), popularity * 100) for item_id, popularity in early],
-                        'mid': [(int(item_id), popularity * 100) for item_id, popularity in mid],
-                        'late': [(int(item_id), popularity * 100) for item_id, popularity in late]
+                        'start': [(int(item_id), count, (count/total_start)*100) for item_id, count in start],
+                        'early': [(int(item_id), count, (count/total_early)*100) for item_id, count in early],
+                        'mid': [(int(item_id), count, (count/total_mid)*100) for item_id, count in mid],
+                        'late': [(int(item_id), count, (count/total_late)*100) for item_id, count in late]
                     }
     except Exception as e:
         print(f"Error en OpenDota items: {e}")
@@ -287,10 +333,10 @@ async def generar_imagen_enemigos(enemigos_ids):
     except:
         font_titulo = ImageFont.load_default()
     
-    bbox = draw.textbbox((0, 0), "👹 HÉROES ENEMIGOS", font=font_titulo)
+    bbox = draw.textbbox((0, 0), "HÉROES ENEMIGOS", font=font_titulo)
     text_width = bbox[2] - bbox[0]
     text_x = (total_width - text_width) // 2
-    draw.text((text_x, 10), "👹 HÉROES ENEMIGOS", fill=(255, 100, 100, 255), font=font_titulo)
+    draw.text((text_x, 10), "HÉROES ENEMIGOS", fill=(255, 100, 100, 255), font=font_titulo)
     
     async with aiohttp.ClientSession() as session:
         for idx, hero_id in enumerate(enemigos_ids):
@@ -316,9 +362,68 @@ async def generar_imagen_enemigos(enemigos_ids):
     
     return output
 
-# ============================================
-# COMANDO COUNTER - DEFINITIVO (SIN EMBED DE 5 HÉROES)
-# ============================================
+def obtener_nombre_item(item_id):
+    nombre = ITEM_IMAGE_NAMES.get(item_id)
+    if not nombre:
+        nombre = items_dict.get(item_id, f"Item {item_id}")
+    return nombre.replace("_", " ").title()
+
+class ItemsView(View):
+    def __init__(self, heroe_id, heroe_nombre, mensajes_a_borrar):
+        super().__init__(timeout=60)
+        self.heroe_id = heroe_id
+        self.heroe_nombre = heroe_nombre
+        self.mensajes_a_borrar = mensajes_a_borrar
+    
+    @nextcord.ui.button(label="Ver Items", style=ButtonStyle.primary)
+    async def ver_items(self, button: Button, interaction: Interaction):
+        try:
+            await interaction.response.defer()
+        except:
+            pass
+        
+        for msg_id in self.mensajes_a_borrar:
+            try:
+                msg = await interaction.channel.fetch_message(msg_id)
+                await msg.delete()
+            except:
+                pass
+        
+        items_data = await obtener_items_opendota(self.heroe_id)
+        
+        if not items_data:
+            embed = nextcord.Embed(
+                title=f"No se encontraron items para {self.heroe_nombre}",
+                color=0xff0000
+            )
+            await interaction.followup.send(embed=embed)
+            return
+        
+        fases = [
+            ("Arranque", items_data.get('start', [])),
+            ("Early", items_data.get('early', [])),
+            ("Mid", items_data.get('mid', [])),
+            ("Late", items_data.get('late', []))
+        ]
+        
+        embed = nextcord.Embed(
+            title=f"Items más usados para {self.heroe_nombre}",
+            color=0x00ff00
+        )
+        
+        for nombre_fase, items in fases:
+            if not items:
+                continue
+            
+            texto = ""
+            for item_id, count, porcentaje in items[:6]:
+                nombre = obtener_nombre_item(item_id)
+                texto += f"• {nombre} - {porcentaje:.1f}%\n"
+            
+            if texto:
+                embed.add_field(name=nombre_fase, value=texto, inline=True)
+        
+        await interaction.followup.send(embed=embed)
 
 @bot.slash_command(name="counter", description="Muestra contrapicks y guía de items para counterear")
 async def counter(
@@ -374,77 +479,38 @@ async def counter(
                 enemigos_ids.append(hero_id)
                 enemigos_nombres.append(nombre)
             else:
-                await interaction.followup.send(f"❌ No se encontró el héroe: **{nombre}**")
+                await interaction.followup.send(f"No se encontró el héroe: {nombre}")
                 return
         
         if not enemigos_ids:
-            await interaction.followup.send("❌ No se encontraron héroes válidos.")
+            await interaction.followup.send("No se encontraron héroes válidos.")
             return
         
-        # Obtener contrapicks (solo 3)
         contrapicks = await obtener_contrapicks(enemigos_ids)
         
         if not contrapicks:
-            await interaction.followup.send("❌ No se encontraron contrapicks para estos héroes")
+            await interaction.followup.send("No se encontraron contrapicks para estos héroes")
             return
         
-        # === 1. ENVIAR IMAGEN DE ENEMIGOS ===
         imagen_enemigos = await generar_imagen_enemigos(enemigos_ids)
         file_enemigos = nextcord.File(imagen_enemigos, filename="enemigos.png")
         embed_enemigos = nextcord.Embed(color=0xff0000)
         embed_enemigos.set_image(url="attachment://enemigos.png")
-        await interaction.followup.send(embed=embed_enemigos, file=file_enemigos)
+        msg_enemigos = await interaction.followup.send(embed=embed_enemigos, file=file_enemigos)
         
-        # === 2. ENVIAR 3 EMBEDS DE CONTRAPICKS ===
+        mensajes_contrapicks = []
         for idx, (hero_id, winrate) in enumerate(contrapicks[:3]):
             hero = heroes_dict.get(hero_id)
             if not hero:
                 continue
             
-            # Obtener items (Stratz o OpenDota)
-            items_guia = await obtener_items_stratz(hero_id, enemigos_ids)
-            if not items_guia:
-                items_guia = await obtener_items_opendota(hero_id)
-            
             embed = nextcord.Embed(
-                title=f"🛡️ {hero['localized_name']}",
+                title=f"{hero['localized_name']}",
                 color=0x00ff00
             )
             
-            embed.add_field(name="📊 Winrate", value=f"{winrate:.1f}%", inline=False)
+            embed.add_field(name="Winrate", value=f"{winrate:.1f}%", inline=False)
             
-            if items_guia:
-                early_text = ""
-                for item_id, popularity in items_guia['early']:
-                    if isinstance(item_id, int):
-                        item_name = items_dict.get(item_id, f"Item {item_id}")
-                    else:
-                        item_name = items_dict.get(int(item_id), f"Item {item_id}")
-                    early_text += f"• **{item_name}** ({popularity:.1f}%)\n"
-                if early_text:
-                    embed.add_field(name="🌱 Early Game", value=early_text, inline=True)
-                
-                mid_text = ""
-                for item_id, popularity in items_guia['mid']:
-                    if isinstance(item_id, int):
-                        item_name = items_dict.get(item_id, f"Item {item_id}")
-                    else:
-                        item_name = items_dict.get(int(item_id), f"Item {item_id}")
-                    mid_text += f"• **{item_name}** ({popularity:.1f}%)\n"
-                if mid_text:
-                    embed.add_field(name="⚔️ Mid Game", value=mid_text, inline=True)
-                
-                late_text = ""
-                for item_id, popularity in items_guia['late']:
-                    if isinstance(item_id, int):
-                        item_name = items_dict.get(item_id, f"Item {item_id}")
-                    else:
-                        item_name = items_dict.get(int(item_id), f"Item {item_id}")
-                    late_text += f"• **{item_name}** ({popularity:.1f}%)\n"
-                if late_text:
-                    embed.add_field(name="🔥 Late Game", value=late_text, inline=True)
-            
-            # Descargar imagen del héroe como thumbnail
             async with aiohttp.ClientSession() as session:
                 img, _ = await descargar_imagen_heroe(session, hero['name'])
                 img_bytes = BytesIO()
@@ -453,10 +519,14 @@ async def counter(
                 file = nextcord.File(img_bytes, filename=f"hero_{idx}.png")
                 embed.set_thumbnail(url=f"attachment://hero_{idx}.png")
                 
-                await interaction.followup.send(embed=embed, file=file)
+                ids_a_borrar = [msg_enemigos.id] + [m.id for m in mensajes_contrapicks]
+                
+                view = ItemsView(hero_id, hero['localized_name'], ids_a_borrar)
+                msg = await interaction.followup.send(embed=embed, file=file, view=view)
+                mensajes_contrapicks.append(msg)
         
     except Exception as e:
-        await interaction.followup.send(f"❌ Error: {str(e)}")
+        await interaction.followup.send(f"Error: {str(e)}")
 
 @counter.on_autocomplete("heroe1")
 async def autocompletar_heroe1(interaction: Interaction, texto_actual: str):
@@ -506,14 +576,14 @@ async def generador(
 @bot.slash_command(name="rango", description="Panel de selección de rango de Dota 2")
 async def rango(interaction: Interaction):
     ranks = {
-        "MedallaHeraldo": PartialEmoji(name="MedallaHeraldo", id=1389344036980265101),
-        "MedallaGuardian": PartialEmoji(name="MedallaGuardian", id=1389344040150892674),
-        "MedallaCruzado": PartialEmoji(name="MedallaCruzado", id=1389344044089348096),
-        "MedallaArconte": PartialEmoji(name="MedallaArconte", id=1389344046261993632),
-        "MedallaLeyenda": PartialEmoji(name="MedallaLeyenda", id=1389344030793400451),
-        "MedallaAncestro": PartialEmoji(name="MedallaAncestro", id=1389344027815579698),
-        "MedallaDivino": PartialEmoji(name="MedallaDivino", id=1389344042076213258),
-        "MedallaInmortal": PartialEmoji(name="MedallaInmortal", id=1389344033784201356)
+        "Heraldo": PartialEmoji(name="MedallaHeraldo", id=1389344036980265101),
+        "Guardian": PartialEmoji(name="MedallaGuardian", id=1389344040150892674),
+        "Cruzado": PartialEmoji(name="MedallaCruzado", id=1389344044089348096),
+        "Arconte": PartialEmoji(name="MedallaArconte", id=1389344046261993632),
+        "Leyenda": PartialEmoji(name="MedallaLeyenda", id=1389344030793400451),
+        "Ancestro": PartialEmoji(name="MedallaAncestro", id=1389344027815579698),
+        "Divino": PartialEmoji(name="MedallaDivino", id=1389344042076213258),
+        "Inmortal": PartialEmoji(name="MedallaInmortal", id=1389344033784201356)
     }
     
     view = View(timeout=None)
@@ -557,7 +627,7 @@ async def on_voice_state_update(member, before, after):
             member: PermissionOverwrite(manage_channels=True)
         }
         voice_channel = await guild.create_voice_channel(
-            name=f"🎤-AUDIO",
+            name=f"AUDIO",
             overwrites=overwrites_voice,
             category=new_category,
             user_limit=5
@@ -568,7 +638,7 @@ async def on_voice_state_update(member, before, after):
             guild.default_role: PermissionOverwrite(read_messages=True, send_messages=True)
         }
         text_channel = await guild.create_text_channel(
-            name=f"💬-CHAT",
+            name=f"CHAT",
             overwrites=overwrites_text,
             category=new_category
         )
@@ -589,7 +659,7 @@ async def on_voice_state_update(member, before, after):
 
 @bot.event
 async def on_ready():
-    global heroes_dict, items_dict
+    global heroes_dict, items_dict, items_dict_es
     
     async with aiohttp.ClientSession() as session:
         async with session.get("https://api.opendota.com/api/heroes") as response:
@@ -601,22 +671,29 @@ async def on_ready():
             if response.status == 200:
                 items_data = await response.json()
                 items_dict = {}
+                items_dict_es = {}
                 for item_id, item_data in items_data.items():
                     try:
                         item_id_int = int(item_id)
-                        items_dict[item_id_int] = item_data.get('dname', item_id)
+                        nombre_en = item_data.get('dname')
+                        nombre_es = item_data.get('dname_es')
+                        if nombre_en:
+                            items_dict[item_id_int] = nombre_en
+                        if nombre_es:
+                            items_dict_es[item_id_int] = nombre_es
                     except ValueError:
                         items_dict[item_id] = item_data.get('dname', item_id)
+                        items_dict_es[item_id] = item_data.get('dname_es', item_id)
     
-    print(f"✅ Bot conectado como {bot.user}")
-    print(f"✅ {len(heroes_dict)} héroes cargados")
-    print(f"✅ {len(items_dict)} items cargados")
+    print(f"Bot conectado como {bot.user}")
+    print(f"{len(heroes_dict)} héroes cargados")
+    print(f"{len(items_dict)} items cargados")
     
     try:
         await bot.sync_all_application_commands()
-        print("✅ Comandos slash sincronizados")
+        print("Comandos slash sincronizados")
     except Exception as e:
-        print(f"⚠️ Error al sincronizar comandos: {e}")
+        print(f"Error al sincronizar comandos: {e}")
 
 if __name__ == "__main__":
     bot.run(TOKEN)
