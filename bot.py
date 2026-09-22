@@ -45,6 +45,49 @@ def guardar_generadores(generadores):
 # Cargar los generadores al iniciar
 generadores = cargar_generadores()
 
+# ------------------- FUNCIÓN AUXILIAR: RANGO DOTA -------------------
+def obtener_texto_rango(rank_tier):
+    """
+    Convierte el rank_tier de OpenDota en texto legible.
+    Formato de rank_tier:
+      - Decena = nivel de medalla (1=Heraldo ... 8=Inmortal)
+      - Unidad = estrellas (1-5)
+      - Inmortal puede ser 80 (sin top) o 81-85 (con top rank)
+    """
+    if not rank_tier:
+        return "Unranked"
+
+    medallas = [
+        "Heraldo",    # 1x
+        "Guardián",   # 2x
+        "Cruzado",    # 3x
+        "Arconte",    # 4x
+        "Leyenda",    # 5x
+        "Ancestro",   # 6x
+        "Divino",     # 7x
+        "Inmortal",   # 8x
+    ]
+    estrellas = ["", "I", "II", "III", "IV", "V"]
+
+    nivel = rank_tier // 10          # 1..8
+    estrellas_num = rank_tier % 10   # 0..5
+
+    if not (1 <= nivel <= 8):
+        return "Unranked"
+
+    nombre_medalla = medallas[nivel - 1]
+
+    # Inmortal: no lleva estrellas romanas
+    if nivel == 8:
+        return "Inmortal"
+
+    # Si por alguna razón viene sin estrella (termina en 0), mostramos solo la medalla
+    if estrellas_num < 1 or estrellas_num > 5:
+        return nombre_medalla
+
+    return f"{nombre_medalla} {estrellas[estrellas_num]}"
+
+
 # ------------------- COMANDO /generador -------------------
 @bot.slash_command(name="generador", description="Asignar canal generador de salas temporales")
 async def generador(
@@ -58,21 +101,21 @@ async def generador(
     if not interaction.user.guild_permissions.administrator:
         await interaction.response.send_message("No tienes permisos.", ephemeral=True)
         return
-    
+
     await interaction.response.defer(ephemeral=True)
-    
+
     guild_id = interaction.guild.id
     nuevo_id = generator.id
     old_id = generadores.get(guild_id)
     generadores[guild_id] = nuevo_id
-    
+
     # Guardar en el archivo (persiste entre reinicios)
     guardar_generadores(generadores)
-    
+
     mensaje = f"Canal generador asignado: <#{nuevo_id}>"
     if old_id and old_id != nuevo_id:
         mensaje = f"Canal actualizado: <#{old_id}> ➔ <#{nuevo_id}>"
-    
+
     await interaction.followup.send(mensaje, ephemeral=True)
 
 # ------------------- EVENTO CANALES TEMPORALES (generador) -------------------
@@ -80,16 +123,16 @@ async def generador(
 async def on_voice_state_update(member, before, after):
     if not after.channel:
         return
-    
+
     guild_id = member.guild.id
     generator_id = generadores.get(guild_id)
-    
+
     if generator_id is None:
         return
-    
+
     if after.channel.id != generator_id:
         return
-    
+
     guild = member.guild
     new_category = await guild.create_category(name=f"# {member.display_name}")
 
@@ -138,31 +181,31 @@ class UnirseAlCreadorView(View):
     async def unirse(self, button: Button, interaction: Interaction):
         guild = interaction.guild
         creador = guild.get_member(self.creador_id)
-        
+
         if not creador:
             await interaction.response.send_message(
                 "El creador ya no está en el servidor.",
                 ephemeral=True
             )
             return
-        
+
         if not creador.voice or not creador.voice.channel:
             await interaction.response.send_message(
                 "El creador no está en un canal de voz en este momento.",
                 ephemeral=True
             )
             return
-        
+
         canal_voz_creador = creador.voice.channel
         member = interaction.user
-        
+
         if member.voice and member.voice.channel and member.voice.channel.id == canal_voz_creador.id:
             await interaction.response.send_message(
                 "Ya estás en la partida del creador.",
                 ephemeral=True
             )
             return
-        
+
         if member.voice and member.voice.channel:
             try:
                 await member.move_to(canal_voz_creador)
@@ -173,7 +216,7 @@ class UnirseAlCreadorView(View):
                 return
             except Exception as e:
                 print(f"Error al mover: {e}")
-        
+
         enlace = f"https://discord.com/channels/{guild.id}/{canal_voz_creador.id}"
         await interaction.response.send_message(
             f"🎮 **Únete a la partida aquí:**\n{enlace}",
@@ -209,14 +252,10 @@ async def buscarpartida(
     avatar = perfil.get('avatarfull')
     rank_tier = data.get('rank_tier')
 
-    medalla_texto = "Unranked"
-    if rank_tier:
-        medallas = ["Heraldo", "Guardián", "Cruzado", "Arconte", "Leyenda", "Ancestro", "Divino", "Inmortal"]
-        estrellas = ["", "I", "II", "III", "IV", "V"]
-        indice_medalla = (rank_tier // 10) - 1
-        indice_estrella = rank_tier % 10
-        if 0 <= indice_medalla < len(medallas):
-            medalla_texto = f"{medallas[indice_medalla]} {estrellas[indice_estrella]}"
+    # DEBUG opcional (puedes borrarlo cuando confirmes que funciona)
+    print(f"[DEBUG] ID={id_jugador} | rank_tier crudo={rank_tier}")
+
+    medalla_texto = obtener_texto_rango(rank_tier)
 
     embed = nextcord.Embed(
         title=f"🎮 Buscando partida - {nombre}",
@@ -239,7 +278,7 @@ async def on_ready():
         # Sincronización global (puede tardar hasta 1 hora)
         await bot.sync_all_application_commands()
         print("Comandos slash sincronizados globalmente")
-        
+
         # Sincronización por servidor (instantánea)
         for guild in bot.guilds:
             await bot.sync_application_commands(guild_id=guild.id)
